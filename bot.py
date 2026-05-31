@@ -3,7 +3,7 @@ from discord.ext import commands, tasks
 import asyncio
 import math
 import psycopg2
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import nest_asyncio
 
@@ -32,12 +32,13 @@ def inicializar_db():
     cursor.close()
     conn.close()
 
-@tasks.loop(seconds=10)
+# 1. BUCLE DE REVISIÓN CORREGIDO (Formato unificado y preciso)
+@tasks.loop(seconds=5)
 async def verificar_muteos_expirados():
     try:
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
-        ahora = datetime.utcnow().isoformat()
+        ahora = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         
         cursor.execute("SELECT usuario_id, servidor_id FROM muteos WHERE expira_en <= %s", (ahora,))
         expirados = cursor.fetchall()
@@ -49,6 +50,7 @@ async def verificar_muteos_expirados():
                 if miembro and miembro.voice:
                     try:
                         await miembro.edit(mute=False)
+                        print(f"🔊 Desmuteado automáticamente: {miembro.display_name}")
                     except Exception as e:
                         print(f"Error desmuteando: {e}")
             
@@ -101,7 +103,11 @@ class VotoControl(discord.ui.View):
                 
                 conn = psycopg2.connect(DB_URI)
                 cursor = conn.cursor()
-                expiracion = (datetime.utcnow() + timedelta(minutes=self.tiempo_minutos)).isoformat()
+                
+                # 2. GUARDADO DE MUTEO CORREGIDO (Formato unificado)
+                futuro = datetime.now(timezone.utc) + timedelta(minutes=self.tiempo_minutos)
+                expiracion = futuro.strftime('%Y-%m-%d %H:%M:%S')
+                
                 cursor.execute("""
                     INSERT INTO muteos (usuario_id, servidor_id, expira_en) 
                     VALUES (%s, %s, %s) 
@@ -122,7 +128,6 @@ class VotoControl(discord.ui.View):
                 await self.mensaje_ctx.edit(content=f"⏰ **Votación Cancelada:** Se acabó el tiempo de 1 minuto para decidir sobre {self.miembro_objetivo.mention}.", view=self)
             except Exception as e:
                 print(f"Error al editar timeout manual: {e}")
-
 
 # CONTROL DE BOTONES EXCLUSIVO PARA SOLICITUD DE INGRESO A CANAL LLENO
 class VotoAccesoControl(discord.ui.View):
@@ -169,10 +174,12 @@ class VotoAccesoControl(discord.ui.View):
             except Exception as e:
                 print(f"Error al editar timeout automático: {e}")
 
-
 # COMANDOS MANUALES (!votar)
 @bot.command()
 async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None):
+    if ctx.author.bot:
+        return
+        
     if accion not in ["sacar", "mutear", "mover"]:
         await ctx.send("❌ Acción inválida. Usa `sacar`, `mutear` o `mover`.")
         return
@@ -210,32 +217,18 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
     view.mensaje_ctx = msg
 
 @bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    await bot.process_commands(message)
+
+@bot.event
 async def on_ready():
-    print(f"🤖 Bot Online en la nube")
+    inicializar_db()
     try:
         verificar_muteos_expirados.start()
     except Exception:
         pass
-
-
-# LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if member.bot:
-        return
-
-    # 1. CONTROL ANTI-EVASIÓN DE MUTEOS
-    if after.channel and not before.channel:
-        conn = psycopg2.connect(DB_URI)
-        cursor = conn.cursor()
-        cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
-        resultado = cursor.fetchone()
-
-        cursor.close()
-        conn.close()
-
-        if resultado and resultado > datetime.utcnow().isoformat():
-            await member.edit(mute=True)
 
 # ====================================================================
 # CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
