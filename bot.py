@@ -25,7 +25,7 @@ def inicializar_db():
         CREATE TABLE IF NOT EXISTS muteos (
             usuario_id BIGINT,
             servidor_id BIGINT,
-            expira_en TEXT,
+            expira_en TIMESTAMP WITH TIME ZONE,
             PRIMARY KEY (usuario_id, servidor_id)
         )
     """)
@@ -33,14 +33,13 @@ def inicializar_db():
     cursor.close()
     conn.close()
 
-# Bucle de revisión corregido con formato de tiempo simplificado libre de errores
-@tasks.loop(seconds=5) # Bajamos a 5 segundos para que sea mucho más rápido y preciso
+# Bucle de revisión horaria basado en zonas horarias nativas de PostgreSQL
+@tasks.loop(seconds=5)
 async def verificar_muteos_expirados():
     try:
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
-        # Tiempo actual en UTC formateado de forma exacta
-        ahora = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        ahora = datetime.now(timezone.utc)
         
         cursor.execute("SELECT usuario_id, servidor_id FROM muteos WHERE expira_en <= %s", (ahora,))
         expirados = cursor.fetchall()
@@ -49,17 +48,17 @@ async def verificar_muteos_expirados():
             guild = bot.get_guild(servidor_id)
             if guild:
                 miembro = guild.get_member(usuario_id)
-                # Remueve el muteo de servidor si el usuario sigue en llamada
-                if miembro and miembro.voice:
+                if miembro:
                     try:
-                        await miembro.edit(mute=False)
-                        print(f"🔊 Desmuteado con éxito: {miembro.display_name}")
+                        # Si el usuario sigue conectado en voz, le quitamos el muteo de servidor
+                        if miembro.voice:
+                            await miembro.edit(mute=False)
+                            print(f"🔊 Desmuteado: {miembro.display_name}")
+                        else:
+                            print(f"⚠️ {miembro.display_name} no está en voz, pero su tiempo expiró.")
                     except Exception as e:
                         print(f"Error desmuteando a {usuario_id}: {e}")
-                else:
-                    print(f"⚠️ El usuario {usuario_id} no está en voz, pero su tiempo expiró. Se limpia de la DB.")
             
-            # Borramos el registro para que no se vuelva a repetir
             cursor.execute("DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (usuario_id, servidor_id))
         
         conn.commit()
@@ -107,11 +106,9 @@ class VotoControl(discord.ui.View):
             elif self.accion == "mutear" and self.tiempo_minutos:
                 await self.miembro_objetivo.edit(mute=True)
                 
-                # Guardar el tiempo exacto en formato limpio para Supabase
                 conn = psycopg2.connect(DB_URI)
                 cursor = conn.cursor()
-                futuro = datetime.now(timezone.utc) + timedelta(minutes=self.tiempo_minutos)
-                expiracion = futuro.strftime('%Y-%m-%d %H:%M:%S')
+                expiracion = datetime.now(timezone.utc) + timedelta(minutes=self.tiempo_minutos)
                 
                 cursor.execute("""
                     INSERT INTO muteos (usuario_id, servidor_id, expira_en) 
@@ -184,6 +181,9 @@ class VotoAccesoControl(discord.ui.View):
 # COMANDOS MANUALES (!votar)
 @bot.command()
 async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None):
+    if ctx.author.bot:
+        return
+        
     if accion not in ["sacar", "mutear", "mover"]:
         await ctx.send("❌ Acción inválida. Usa `sacar`, `mutear` o `mover`.")
         return
@@ -215,6 +215,14 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
         mensaje_texto += f" por {tiempo} minutos."
     if canal_destino: 
         mensaje_texto += f" al canal {canal_destino.mention}."
+    mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos. ¡Tienen **1 minuto** para votar!"
+
+    msg = await ctx.send(mensaje_texto, view=view)
+    view.mensaje_ctx = msg
+
+# CORRECCIÓN VITAL: Permite escuchar los comandos ! de texto sin que los eventos de voz interfieran
+@bot.event
+async def on_message(message):
 
 # ====================================================================
 # Servidor web falso para engañar a Render y evitar el Port Timeout
