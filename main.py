@@ -7,6 +7,9 @@ import psycopg2
 from datetime import datetime, timedelta
 import os
 import nest_asyncio
+from fastapi import FastAPI
+import uvicorn
+from contextlib import asynccontextmanager
 
 nest_asyncio.apply()
 
@@ -120,7 +123,6 @@ class VotoControl(discord.ui.View):
                 cursor.close()
                 conn.close()
         else:
-            # Corrección de actualización del footer del Embed original
             nuevo_embed = self.embed_original.copy()
             nuevo_embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
             await interaction.response.edit_message(embed=nuevo_embed)
@@ -181,7 +183,6 @@ class VotoAccesoControl(discord.ui.View):
                 except Exception as e:
                     print(f"Error al mover usuario permitido: {e}")
         else:
-            # Corrección de actualización del footer del Embed de acceso
             nuevo_embed = self.embed_original.copy()
             nuevo_embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
             await interaction.response.edit_message(embed=nuevo_embed)
@@ -201,7 +202,7 @@ class VotoAccesoControl(discord.ui.View):
                 print(f"Error al editar timeout automático: {e}")
 
 
-# NUEVO COMANDO DE BARRA DIAGONAL MÁS VISUAL (/votar)
+# COMANDO DE BARRA DIAGONAL (/votar)
 @bot.tree.command(name="votar", description="Inicia una votación democrática para moderar la llamada de voz.")
 @app_commands.describe(
     accion="Selecciona qué quieres hacer",
