@@ -6,9 +6,6 @@ import psycopg2
 from datetime import datetime, timedelta, timezone
 import os
 import nest_asyncio
-from fastapi import FastAPI
-import uvicorn
-from contextlib import asynccontextmanager
 
 nest_asyncio.apply()
 
@@ -188,7 +185,7 @@ class VotoAccesoControl(discord.ui.View):
             child.disabled = True
         if self.mensaje_ctx:
             try:
-                await self.mensaje_ctx.edit(content=f"⏰ **Solicitud">Rechazada:** Se agotó el tiempo de 1 minuto. No se permitió la entrada de {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=self)
+                await self.mensaje_ctx.edit(content=f"⏰ **Solicitud Rechazada:** Se agotó el tiempo de 1 minuto. No se permitió la entrada de {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=self)
             except Exception as e:
                 print(f"Error al editar timeout automático: {e}")
 
@@ -221,6 +218,8 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
 
     usuarios_canal = [m for m in miembro.voice.channel.members if not m.bot]
     votos_necesarios = math.ceil(len(usuarios_canal) / 2)
+
+    view = VotoControl(miembro, votos_necesarios, accion, tiempo_minutos=tiempo, canal_destino=canal_destino)
 
 # ====================================================================
 # CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
