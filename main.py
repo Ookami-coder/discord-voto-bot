@@ -200,8 +200,10 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
     view = VotoControl(miembro, votos_necesarios, accion, tiempo_minutos=tiempo, canal_destino=canal_destino)
     
     mensaje_texto = f"🗳️ **Votación Iniciada por {ctx.author.mention}:** ¿Desean **{accion}** a {miembro.mention}?"
-    if accion == "mutear": mensaje_texto += f" por {tiempo} minutos."
-    if canal_destino: mensaje_texto += f" al canal {canal_destino.mention}."
+    if accion == "mutear": 
+        mensaje_texto += f" por {tiempo} minutos."
+    if canal_destino: 
+        mensaje_texto += f" al canal {canal_destino.mention}."
     mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos. ¡Tienen **1 minuto** para votar!"
 
     msg = await ctx.send(mensaje_texto, view=view)
@@ -210,7 +212,10 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
 @bot.event
 async def on_ready():
     inicializar_db()
-    verificar_muteos_expirados.start()
+    try:
+        verificar_muteos_expirados.start()
+    except Exception:
+        pass
     print(f"🤖 Bot Online en la nube")
 
 
@@ -225,7 +230,3 @@ async def on_voice_state_update(member, before, after):
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
         cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
-        resultado = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
