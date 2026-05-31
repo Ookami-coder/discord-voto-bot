@@ -162,5 +162,15 @@ async def on_voice_state_update(member, before, after):
 
         if resultado and resultado[0] > datetime.utcnow().isoformat():
             await member.edit(mute=True)
+            
+# Servidor web falso para engañar a Render y evitar el Port Timeout
+from threading import Thread
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+def run_fake_server():
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
+Thread(target=run_fake_server, daemon=True).start()
 
 bot.run(os.getenv("DISCORD_TOKEN"))
