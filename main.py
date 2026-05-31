@@ -1,9 +1,9 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import math
 import psycopg2
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import os
 import nest_asyncio
 
@@ -32,50 +32,33 @@ def inicializar_db():
     cursor.close()
     conn.close()
 
-# RELOJ ASÍNCRONO INFINITO SEGURO (Reemplaza al tasks.loop problemático)
-async def verificar_muteos_segundo_plano():
-    await bot.wait_until_ready() # Espera estricta a que el bot esté 100% conectado
-    print("⏰ Reloj de desmuteos activo e iniciado de forma permanente.")
-    
-    while not bot.is_closed():
-        try:
-            conn = psycopg2.connect(DB_URI)
-            cursor = conn.cursor()
-            ahora = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+@tasks.loop(seconds=10)
+async def verificar_muteos_expirados():
+    try:
+        conn = psycopg2.connect(DB_URI)
+        cursor = conn.cursor()
+        ahora = datetime.utcnow().isoformat()
+        
+        cursor.execute("SELECT usuario_id, servidor_id FROM muteos WHERE expira_en <= %s", (ahora,))
+        expirados = cursor.fetchall()
+        
+        for usuario_id, servidor_id in expirados:
+            guild = bot.get_guild(servidor_id)
+            if guild:
+                miembro = guild.get_member(usuario_id)
+                if miembro and miembro.voice:
+                    try:
+                        await miembro.edit(mute=False)
+                    except Exception as e:
+                        print(f"Error desmuteando: {e}")
             
-            cursor.execute("SELECT usuario_id, servidor_id FROM muteos WHERE expira_en <= %s", (ahora,))
-            expirados = cursor.fetchall()
-            
-            for usuario_id, servidor_id in expirados:
-                guild = bot.get_guild(servidor_id)
-                if guild:
-                    miembro = guild.get_member(usuario_id)
-                    # Forzamos la descarga del miembro si no está en la caché interna
-                    if not miembro:
-                        try:
-                            miembro = await guild.fetch_member(usuario_id)
-                        except Exception:
-                            miembro = None
-
-                    if miembro:
-                        if miembro.voice:
-                            try:
-                                await miembro.edit(mute=False)
-                                print(f"🔊 Desmuteado automáticamente en voz: {miembro.display_name}")
-                            except Exception as e:
-                                print(f"Error al quitar muteo en Discord para {usuario_id}: {e}")
-                        else:
-                            print(f"ℹ️ {miembro.display_name} ya no está en llamada. Se limpia el registro de la DB.")
-                
-                cursor.execute("DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (usuario_id, servidor_id))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-        except Exception as e:
-            print(f"Error en bucle de base de datos: {e}")
-            
-        await asyncio.sleep(5) # Revisa de forma exacta cada 5 segundos
+            cursor.execute("DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (usuario_id, servidor_id))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Error en base de datos: {e}")
 
 # CONTROL DE BOTONES PARA EXPULSIÓN, MUTEOS Y TRASLADOS MANUALES
 class VotoControl(discord.ui.View):
@@ -114,16 +97,11 @@ class VotoControl(discord.ui.View):
             elif self.accion == "mover" and self.canal_destino:
                 await self.miembro_objetivo.move_to(self.canal_destino)
             elif self.accion == "mutear" and self.tiempo_minutos:
-                try:
-                    await self.miembro_objetivo.edit(mute=True)
-                except Exception as e:
-                    print(f"Error al mutear físicamente: {e}")
+                await self.miembro_objetivo.edit(mute=True)
                 
                 conn = psycopg2.connect(DB_URI)
                 cursor = conn.cursor()
-                futuro = datetime.now(timezone.utc) + timedelta(minutes=self.tiempo_minutos)
-                expiracion = futuro.strftime('%Y-%m-%d %H:%M:%S')
-                
+                expiracion = (datetime.utcnow() + timedelta(minutes=self.tiempo_minutos)).isoformat()
                 cursor.execute("""
                     INSERT INTO muteos (usuario_id, servidor_id, expira_en) 
                     VALUES (%s, %s, %s) 
@@ -195,9 +173,6 @@ class VotoAccesoControl(discord.ui.View):
 # COMANDOS MANUALES (!votar)
 @bot.command()
 async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None):
-    if ctx.author.bot:
-        return
-        
     if accion not in ["sacar", "mutear", "mover"]:
         await ctx.send("❌ Acción inválida. Usa `sacar`, `mutear` o `mover`.")
         return
@@ -218,6 +193,49 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
         if not canal_destino:
             await ctx.send(f"❌ No encontré el canal de voz '{argumento}'.")
             return
+
+    usuarios_canal = [m for m in miembro.voice.channel.members if not m.bot]
+    votos_necesarios = math.ceil(len(usuarios_canal) / 2)
+
+    view = VotoControl(miembro, votos_necesarios, accion, tiempo_minutos=tiempo, canal_destino=canal_destino)
+    
+    mensaje_texto = f"🗳️ **Votación Iniciada por {ctx.author.mention}:** ¿Desean **{accion}** a {miembro.mention}?"
+    if accion == "mutear": 
+        mensaje_texto += f" por {tiempo} minutos."
+    if canal_destino: 
+        mensaje_texto += f" al canal {canal_destino.mention}."
+    mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos. ¡Tienen **1 minuto** para votar!"
+
+    msg = await ctx.send(mensaje_texto, view=view)
+    view.mensaje_ctx = msg
+
+@bot.event
+async def on_ready():
+    print(f"🤖 Bot Online en la nube")
+    try:
+        verificar_muteos_expirados.start()
+    except Exception:
+        pass
+
+
+# LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+
+    # 1. CONTROL ANTI-EVASIÓN DE MUTEOS
+    if after.channel and not before.channel:
+        conn = psycopg2.connect(DB_URI)
+        cursor = conn.cursor()
+        cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
+        resultado = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if resultado and resultado > datetime.utcnow().isoformat():
+            await member.edit(mute=True)
 
 # ====================================================================
 # CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
