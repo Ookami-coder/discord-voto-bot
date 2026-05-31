@@ -227,3 +227,18 @@ async def votar_slash(interaction: discord.Interaction, accion: str, miembro: di
         if not argumento:
             await interaction.response.send_message("❌ Especifica el nombre o ID del canal de voz de destino en el campo de argumento.", ephemeral=True)
             return
+
+# ====================================================================
+# Servidor web falso para engañar a Render y evitar el Port Timeout
+from threading import Thread
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+def run_fake_server():
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
+Thread(target=run_fake_server, daemon=True).start()
+# ====================================================================
+
+# TU LÍNEA FINAL ORIGINAL (Mantenla tal cual):
+bot.run(os.getenv("DISCORD_TOKEN"))
