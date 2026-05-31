@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import asyncio
 import math
 import psycopg2
@@ -60,7 +61,7 @@ async def verificar_muteos_expirados():
     except Exception as e:
         print(f"Error en base de datos: {e}")
 
-# CONTROL DE BOTONES PARA EXPULSIÓN, MUTEOS Y TRASLADOS MANUALES
+# INTERFAZ VISUAL: BOTONES PARA MODERACIÓN MANUAL
 class VotoControl(discord.ui.View):
     def __init__(self, miembro_objetivo, votantes_requeridos, accion, tiempo_minutos=None, canal_destino=None, mensaje_ctx=None):
         super().__init__(timeout=60.0)
@@ -87,10 +88,16 @@ class VotoControl(discord.ui.View):
 
         if votos_actuales >= self.votantes_requeridos:
             self.stop()
-            detalles = f" por {self.tiempo_minutos} minutos" if self.tiempo_minutos else ""
-            if self.canal_destino: detalles = f" a {self.canal_destino.name}"
             
-            await interaction.response.edit_message(content=f"🗳️ ¡Votación Aprobada! Aplicando **{self.accion}** a {self.miembro_objetivo.mention}{detalles}.", view=None)
+            embed = discord.Embed(
+                title="🗳️ ¡Votación Aprobada!",
+                description=f"La comunidad ha decidido aplicar **{self.accion}** a {self.miembro_objetivo.mention}.",
+                color=discord.Color.green()
+            )
+            if self.tiempo_minutos: embed.add_field(name="Duración", value=f"{self.tiempo_minutos} minutos")
+            if self.canal_destino: embed.add_field(name="Destino", value=self.canal_destino.mention)
+            
+            await interaction.response.edit_message(embed=embed, view=None)
             
             if self.accion == "sacar":
                 await self.miembro_objetivo.move_to(None)
@@ -112,19 +119,26 @@ class VotoControl(discord.ui.View):
                 cursor.close()
                 conn.close()
         else:
-            await interaction.response.edit_message(content=f"Votos para {self.accion} a {self.miembro_objetivo.mention}: {votos_actuales}/{self.votantes_requeridos}")
+            embed = interaction.message.embeds[0]
+            embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
+            await interaction.response.edit_message(embed=embed)
 
     async def on_timeout(self):
         for child in self.children:
             child.disabled = True
         if self.mensaje_ctx:
             try:
-                await self.mensaje_ctx.edit(content=f"⏰ **Votación Cancelada:** Se acabó el tiempo de 1 minuto para decidir sobre {self.miembro_objetivo.mention}.", view=self)
+                embed = discord.Embed(
+                    title="⏰ Votación Cancelada",
+                    description=f"Se acabó el tiempo de 1 minuto para decidir sobre {self.miembro_objetivo.mention}.",
+                    color=discord.Color.orange()
+                )
+                await self.mensaje_ctx.edit(embed=embed, view=self)
             except Exception as e:
                 print(f"Error al editar timeout manual: {e}")
 
 
-# CONTROL DE BOTONES EXCLUSIVO PARA SOLICITUD DE INGRESO A CANAL LLENO
+# INTERFAZ VISUAL: BOTONES PARA ACCESO A CANALES LLENOS
 class VotoAccesoControl(discord.ui.View):
     def __init__(self, miembro_solicitante, canal_privado, votantes_requeridos, mensaje_ctx=None):
         super().__init__(timeout=60.0)
@@ -149,7 +163,13 @@ class VotoAccesoControl(discord.ui.View):
 
         if votos_actuales >= self.votantes_requeridos:
             self.stop()
-            await interaction.response.edit_message(content=f"🗳️ ¡Acceso Aprobado! Moviendo a {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=None)
+            
+            embed = discord.Embed(
+                title="🗳️ ¡Acceso Aprobado!",
+                description=f"Se ha permitido la entrada de {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.",
+                color=discord.Color.green()
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
             
             if self.miembro_solicitante.voice:
                 try:
@@ -158,26 +178,41 @@ class VotoAccesoControl(discord.ui.View):
                 except Exception as e:
                     print(f"Error al mover usuario permitido: {e}")
         else:
-            await interaction.response.edit_message(content=f"Solicitud de entrada de {self.miembro_solicitante.mention}. Votos: {votos_actuales}/{self.votantes_requeridos}")
+            embed = interaction.message.embeds[0]
+            embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
+            await interaction.response.edit_message(embed=embed)
 
     async def on_timeout(self):
         for child in self.children:
             child.disabled = True
         if self.mensaje_ctx:
             try:
-                await self.mensaje_ctx.edit(content=f"⏰ **Solicitud Rechazada:** Se agotó el tiempo de 1 minuto. No se permitió la entrada de {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=self)
+                embed = discord.Embed(
+                    title="⏰ Solicitud Rechazada",
+                    description=f"Se agotó el tiempo de 1 minuto. No se permitió la entrada de {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.",
+                    color=discord.Color.red()
+                )
+                await self.mensaje_ctx.edit(embed=embed, view=self)
             except Exception as e:
                 print(f"Error al editar timeout automático: {e}")
 
 
-# COMANDOS MANUALES (!votar)
-@bot.command()
-async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None):
-    if accion not in ["sacar", "mutear", "mover"]:
-        await ctx.send("❌ Acción inválida. Usa `sacar`, `mutear` o `mover`.")
-        return
+# NUEVO COMANDO DE BARRA DIAGONAL MÁS VISUAL (/votar)
+@bot.tree.command(name="votar", description="Inicia una votación democrática para moderar la llamada de voz.")
+@app_commands.describe(
+    accion="Selecciona qué quieres hacer",
+    miembro="El usuario al que se le aplicará la acción",
+    argumento="Minutos para mutear O Nombre/ID del canal de voz para mover"
+)
+@app_commands.choices(accion=[
+    app_commands.Choice(name="Sacar de la llamada", value="sacar"),
+    app_commands.Choice(name="Mutear temporalmente", value="mutear"),
+    app_commands.Choice(name="Mover a otra sala", value="mover")
+])
+async def votar_slash(interaction: discord.Interaction, accion: str, miembro: discord.Member, argumento: str = None):
+    # En comandos diagonales se usa interaction en lugar de ctx
     if not miembro.voice or not miembro.voice.channel:
-        await ctx.send(f"❌ {miembro.display_name} no está en ningún canal de voz.")
+        await interaction.response.send_message(f"❌ {miembro.display_name} no está en ningún canal de voz.", ephemeral=True)
         return
 
     tiempo = int(argumento) if accion == "mutear" and argumento and argumento.isdigit() else 5
@@ -185,84 +220,9 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
 
     if accion == "mover":
         if not argumento:
-            await ctx.send("❌ Especifica el nombre o ID del canal de voz de destino.")
+            await interaction.response.send_message("❌ Especifica el nombre o ID del canal de voz de destino en el campo de argumento.", ephemeral=True)
             return
-        canal_destino = discord.utils.get(ctx.guild.voice_channels, name=argumento)
+        canal_destino = discord.utils.get(interaction.guild.voice_channels, name=argumento)
         if not canal_destino and argumento.isdigit():
-            canal_destino = ctx.guild.get_channel(int(argumento))
+            canal_destino = interaction.guild.get_channel(int(argumento))
         if not canal_destino:
-            await ctx.send(f"❌ No encontré el canal de voz '{argumento}'.")
-            return
-
-    usuarios_canal = [m for m in miembro.voice.channel.members if not m.bot]
-    votos_necesarios = math.ceil(len(usuarios_canal) / 2)
-
-    view = VotoControl(miembro, votos_necesarios, accion, tiempo_minutos=tiempo, canal_destino=canal_destino)
-    
-    mensaje_texto = f"🗳️ **Votación Iniciada por {ctx.author.mention}:** ¿Desean **{accion}** a {miembro.mention}?"
-    if accion == "mutear": 
-        mensaje_texto += f" por {tiempo} minutos."
-    if canal_destino: 
-        mensaje_texto += f" al canal {canal_destino.mention}."
-    mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos. ¡Tienen **1 minuto** para votar!"
-
-    msg = await ctx.send(mensaje_texto, view=view)
-    view.mensaje_ctx = msg
-
-@bot.event
-async def on_ready():
-    print(f"🤖 Bot Online en la nube")
-    try:
-        verificar_muteos_expirados.start()
-    except Exception:
-        pass
-
-
-# LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if member.bot:
-        return
-
-    # 1. CONTROL ANTI-EVASIÓN DE MUTEOS
-    if after.channel and not before.channel:
-        conn = psycopg2.connect(DB_URI)
-        cursor = conn.cursor()
-        cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
-        resultado = cursor.fetchone()
-
-        cursor.close()
-        conn.close()
-
-        if resultado and resultado > datetime.utcnow().isoformat():
-            await member.edit(mute=True)
-
-# ====================================================================
-# CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
-from threading import Thread
-from http.server import SimpleHTTPRequestHandler, HTTPServer
-
-def iniciar_bot_fondo():
-    import time
-    time.sleep(2)
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(bot.start(os.getenv("DISCORD_TOKEN")))
-    except Exception as e:
-        print(f"Error al iniciar el bot: {e}")
-
-if __name__ == "__main__":
-    try:
-        inicializar_db()
-    except Exception as e:
-        print(f"Error inicializando DB: {e}")
-    
-    # 1. Arrancamos el bot de Discord en un hilo secundario de fondo
-    Thread(target=iniciar_bot_fondo, daemon=True).start()
-    
-    # 2. Dejamos el servidor web como proceso principal en el puerto 10000
-    print("Moviendo servidor web al proceso principal para Render...")
-    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
-    server.serve_forever()
-# ====================================================================
