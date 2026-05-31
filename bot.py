@@ -243,20 +243,13 @@ from threading import Thread
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 def iniciar_bot_fondo():
-    import time
-    time.sleep(2)
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(bot.start(os.getenv("DISCORD_TOKEN")))
+        asyncio.run(bot.start(os.getenv("DISCORD_TOKEN")))
     except Exception as e:
         print(f"Error al iniciar el bot: {e}")
 
 if __name__ == "__main__":
-    try:
-        inicializar_db()
-    except Exception as e:
-        print(f"Error inicializando DB: {e}")
+    inicializar_db()
     
     # 1. Arrancamos el bot de Discord en un hilo secundario de fondo
     Thread(target=iniciar_bot_fondo, daemon=True).start()
