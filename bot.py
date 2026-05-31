@@ -3,7 +3,7 @@ from discord.ext import commands, tasks
 import asyncio
 import math
 import psycopg2
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import os
 import nest_asyncio
 
@@ -24,7 +24,7 @@ def inicializar_db():
         CREATE TABLE IF NOT EXISTS muteos (
             usuario_id BIGINT,
             servidor_id BIGINT,
-            expira_en TIMESTAMP WITH TIME ZONE,
+            expira_en TEXT,
             PRIMARY KEY (usuario_id, servidor_id)
         )
     """)
@@ -32,12 +32,12 @@ def inicializar_db():
     cursor.close()
     conn.close()
 
-@tasks.loop(seconds=5)
+@tasks.loop(seconds=10)
 async def verificar_muteos_expirados():
     try:
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
-        ahora = datetime.now(timezone.utc)
+        ahora = datetime.utcnow().isoformat()
         
         cursor.execute("SELECT usuario_id, servidor_id FROM muteos WHERE expira_en <= %s", (ahora,))
         expirados = cursor.fetchall()
@@ -46,13 +46,11 @@ async def verificar_muteos_expirados():
             guild = bot.get_guild(servidor_id)
             if guild:
                 miembro = guild.get_member(usuario_id)
-                if miembro:
+                if miembro and miembro.voice:
                     try:
-                        if miembro.voice:
-                            await miembro.edit(mute=False)
-                            print(f"🔊 Desmuteado: {miembro.display_name}")
+                        await miembro.edit(mute=False)
                     except Exception as e:
-                        print(f"Error desmuteando a {usuario_id}: {e}")
+                        print(f"Error desmuteando: {e}")
             
             cursor.execute("DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (usuario_id, servidor_id))
         
@@ -60,7 +58,7 @@ async def verificar_muteos_expirados():
         cursor.close()
         conn.close()
     except Exception as e:
-        print(f"Error en bucle de base de datos: {e}")
+        print(f"Error en base de datos: {e}")
 
 # CONTROL DE BOTONES PARA EXPULSIÓN, MUTEOS Y TRASLADOS MANUALES
 class VotoControl(discord.ui.View):
@@ -103,8 +101,7 @@ class VotoControl(discord.ui.View):
                 
                 conn = psycopg2.connect(DB_URI)
                 cursor = conn.cursor()
-                expiracion = datetime.now(timezone.utc) + timedelta(minutes=self.tiempo_minutos)
-                
+                expiracion = (datetime.utcnow() + timedelta(minutes=self.tiempo_minutos)).isoformat()
                 cursor.execute("""
                     INSERT INTO muteos (usuario_id, servidor_id, expira_en) 
                     VALUES (%s, %s, %s) 
@@ -176,9 +173,6 @@ class VotoAccesoControl(discord.ui.View):
 # COMANDOS MANUALES (!votar)
 @bot.command()
 async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None):
-    if ctx.author.bot:
-        return
-        
     if accion not in ["sacar", "mutear", "mover"]:
         await ctx.send("❌ Acción inválida. Usa `sacar`, `mutear` o `mover`.")
         return
@@ -216,21 +210,59 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
     view.mensaje_ctx = msg
 
 @bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    await bot.process_commands(message)
-
-@bot.event
 async def on_ready():
-    inicializar_db()
+    print(f"🤖 Bot Online en la nube")
     try:
         verificar_muteos_expirados.start()
     except Exception:
         pass
-    print(f"🤖 Bot Online en la nube")
 
 
 # LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
 @bot.event
 async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+
+    # 1. CONTROL ANTI-EVASIÓN DE MUTEOS
+    if after.channel and not before.channel:
+        conn = psycopg2.connect(DB_URI)
+        cursor = conn.cursor()
+        cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
+        resultado = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if resultado and resultado > datetime.utcnow().isoformat():
+            await member.edit(mute=True)
+
+# ====================================================================
+# CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
+from threading import Thread
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+def iniciar_bot_fondo():
+    import time
+    time.sleep(2)
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(bot.start(os.getenv("DISCORD_TOKEN")))
+    except Exception as e:
+        print(f"Error al iniciar el bot: {e}")
+
+if __name__ == "__main__":
+    try:
+        inicializar_db()
+    except Exception as e:
+        print(f"Error inicializando DB: {e}")
+    
+    # 1. Arrancamos el bot de Discord en un hilo secundario de fondo
+    Thread(target=iniciar_bot_fondo, daemon=True).start()
+    
+    # 2. Dejamos el servidor web como proceso principal en el puerto 10000
+    print("Moviendo servidor web al proceso principal para Render...")
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
+    server.serve_forever()
+# ====================================================================
