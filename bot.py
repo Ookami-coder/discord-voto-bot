@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 import asyncio
 import math
 import psycopg2
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import nest_asyncio
 
@@ -33,12 +33,14 @@ def inicializar_db():
     cursor.close()
     conn.close()
 
-@tasks.loop(seconds=10)
+# Bucle de revisión corregido con formato de tiempo simplificado libre de errores
+@tasks.loop(seconds=5) # Bajamos a 5 segundos para que sea mucho más rápido y preciso
 async def verificar_muteos_expirados():
     try:
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
-        ahora = datetime.utcnow().isoformat()
+        # Tiempo actual en UTC formateado de forma exacta
+        ahora = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         
         cursor.execute("SELECT usuario_id, servidor_id FROM muteos WHERE expira_en <= %s", (ahora,))
         expirados = cursor.fetchall()
@@ -47,19 +49,24 @@ async def verificar_muteos_expirados():
             guild = bot.get_guild(servidor_id)
             if guild:
                 miembro = guild.get_member(usuario_id)
+                # Remueve el muteo de servidor si el usuario sigue en llamada
                 if miembro and miembro.voice:
                     try:
                         await miembro.edit(mute=False)
+                        print(f"🔊 Desmuteado con éxito: {miembro.display_name}")
                     except Exception as e:
-                        print(f"Error desmuteando: {e}")
+                        print(f"Error desmuteando a {usuario_id}: {e}")
+                else:
+                    print(f"⚠️ El usuario {usuario_id} no está en voz, pero su tiempo expiró. Se limpia de la DB.")
             
+            # Borramos el registro para que no se vuelva a repetir
             cursor.execute("DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (usuario_id, servidor_id))
         
         conn.commit()
         cursor.close()
         conn.close()
     except Exception as e:
-        print(f"Error en base de datos: {e}")
+        print(f"Error en bucle de base de datos: {e}")
 
 # CONTROL DE BOTONES PARA EXPULSIÓN, MUTEOS Y TRASLADOS MANUALES
 class VotoControl(discord.ui.View):
@@ -100,9 +107,12 @@ class VotoControl(discord.ui.View):
             elif self.accion == "mutear" and self.tiempo_minutos:
                 await self.miembro_objetivo.edit(mute=True)
                 
+                # Guardar el tiempo exacto en formato limpio para Supabase
                 conn = psycopg2.connect(DB_URI)
                 cursor = conn.cursor()
-                expiracion = (datetime.utcnow() + timedelta(minutes=self.tiempo_minutos)).isoformat()
+                futuro = datetime.now(timezone.utc) + timedelta(minutes=self.tiempo_minutos)
+                expiracion = futuro.strftime('%Y-%m-%d %H:%M:%S')
+                
                 cursor.execute("""
                     INSERT INTO muteos (usuario_id, servidor_id, expira_en) 
                     VALUES (%s, %s, %s) 
@@ -205,32 +215,6 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
         mensaje_texto += f" por {tiempo} minutos."
     if canal_destino: 
         mensaje_texto += f" al canal {canal_destino.mention}."
-    mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos. ¡Tienen **1 minuto** para votar!"
-
-    msg = await ctx.send(mensaje_texto, view=view)
-    view.mensaje_ctx = msg
-
-@bot.event
-async def on_ready():
-    inicializar_db()
-    try:
-        verificar_muteos_expirados.start()
-    except Exception:
-        pass
-    print(f"🤖 Bot Online en la nube")
-
-
-# LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if member.bot:
-        return
-
-    # 1. CONTROL ANTI-EVASIÓN DE MUTEOS
-    if after.channel and not before.channel:
-        conn = psycopg2.connect(DB_URI)
-        cursor = conn.cursor()
-        cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
 
 # ====================================================================
 # Servidor web falso para engañar a Render y evitar el Port Timeout
