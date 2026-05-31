@@ -5,6 +5,9 @@ import math
 import psycopg2
 from datetime import datetime, timedelta
 import os
+import nest_asyncio
+
+nest_asyncio.apply()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -57,14 +60,16 @@ async def verificar_muteos_expirados():
     except Exception as e:
         print(f"Error en base de datos: {e}")
 
+# CONTROL DE BOTONES PARA EXPULSIÓN, MUTEOS Y TRASLADOS MANUALES
 class VotoControl(discord.ui.View):
-    def __init__(self, miembro_objetivo, votantes_requeridos, accion, tiempo_minutos=None, canal_destino=None):
-        super().__init__(timeout=60)
+    def __init__(self, miembro_objetivo, votantes_requeridos, accion, tiempo_minutos=None, canal_destino=None, mensaje_ctx=None):
+        super().__init__(timeout=60.0)
         self.miembro_objetivo = miembro_objetivo
         self.votantes_requeridos = votantes_requeridos
         self.accion = accion
         self.tiempo_minutos = tiempo_minutos
         self.canal_destino = canal_destino
+        self.mensaje_ctx = mensaje_ctx
         self.votos_favor = set()
 
     @discord.ui.button(label="Votar SÍ", style=discord.ButtonStyle.danger, emoji="✅")
@@ -109,6 +114,63 @@ class VotoControl(discord.ui.View):
         else:
             await interaction.response.edit_message(content=f"Votos para {self.accion} a {self.miembro_objetivo.mention}: {votos_actuales}/{self.votantes_requeridos}")
 
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.mensaje_ctx:
+            try:
+                await self.mensaje_ctx.edit(content=f"⏰ **Votación Cancelada:** Se acabó el tiempo de 1 minuto para decidir sobre {self.miembro_objetivo.mention}.", view=self)
+            except Exception as e:
+                print(f"Error al editar timeout manual: {e}")
+
+
+# CONTROL DE BOTONES EXCLUSIVO PARA SOLICITUD DE INGRESO A CANAL LLENO
+class VotoAccesoControl(discord.ui.View):
+    def __init__(self, miembro_solicitante, canal_privado, votantes_requeridos, mensaje_ctx=None):
+        super().__init__(timeout=60.0)
+        self.miembro_solicitante = miembro_solicitante
+        self.canal_privado = canal_privado
+        self.votantes_requeridos = votantes_requeridos
+        self.mensaje_ctx = mensaje_ctx
+        self.votos_favor = set()
+
+    @discord.ui.button(label="Permitir Entrada", style=discord.ButtonStyle.success, emoji="🔓")
+    async def permitir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.voice or interaction.user.voice.channel != self.canal_privado:
+            await interaction.response.send_message("Solo los miembros dentro del canal lleno pueden votar.", ephemeral=True)
+            return
+
+        if interaction.user.id in self.votos_favor:
+            await interaction.response.send_message("Ya diste tu voto.", ephemeral=True)
+            return
+
+        self.votos_favor.add(interaction.user.id)
+        votos_actuales = len(self.votos_favor)
+
+        if votos_actuales >= self.votantes_requeridos:
+            self.stop()
+            await interaction.response.edit_message(content=f"🗳️ ¡Acceso Aprobado! Moviendo a {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=None)
+            
+            if self.miembro_solicitante.voice:
+                try:
+                    await self.canal_privado.set_permissions(self.miembro_solicitante, connect=True)
+                    await self.miembro_solicitante.move_to(self.canal_privado)
+                except Exception as e:
+                    print(f"Error al mover usuario permitido: {e}")
+        else:
+            await interaction.response.edit_message(content=f"Solicitud de entrada de {self.miembro_solicitante.mention}. Votos: {votos_actuales}/{self.votantes_requeridos}")
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.mensaje_ctx:
+            try:
+                await self.mensaje_ctx.edit(content=f"⏰ **Solicitud Rechazada:** Se agotó el tiempo de 1 minuto. No se permitió la entrada de {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=self)
+            except Exception as e:
+                print(f"Error al editar timeout automático: {e}")
+
+
+# COMANDOS MANUALES (!votar)
 @bot.command()
 async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None):
     if accion not in ["sacar", "mutear", "mover"]:
@@ -140,9 +202,10 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
     mensaje_texto = f"🗳️ **Votación Iniciada por {ctx.author.mention}:** ¿Desean **{accion}** a {miembro.mention}?"
     if accion == "mutear": mensaje_texto += f" por {tiempo} minutos."
     if canal_destino: mensaje_texto += f" al canal {canal_destino.mention}."
-    mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos (Mayoría de la llamada)."
+    mensaje_texto += f"\nSe necesitan **{votos_necesarios}** votos. ¡Tienen **1 minuto** para votar!"
 
-    await ctx.send(mensaje_texto, view=view)
+    msg = await ctx.send(mensaje_texto, view=view)
+    view.mensaje_ctx = msg
 
 @bot.event
 async def on_ready():
@@ -150,8 +213,14 @@ async def on_ready():
     verificar_muteos_expirados.start()
     print(f"🤖 Bot Online en la nube")
 
+
+# LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
 @bot.event
 async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+
+    # 1. CONTROL ANTI-EVASIÓN DE MUTEOS
     if after.channel and not before.channel:
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
@@ -160,17 +229,3 @@ async def on_voice_state_update(member, before, after):
         cursor.close()
         conn.close()
 
-        if resultado and resultado[0] > datetime.utcnow().isoformat():
-            await member.edit(mute=True)
-            
-# Servidor web falso para engañar a Render y evitar el Port Timeout
-from threading import Thread
-from http.server import SimpleHTTPRequestHandler, HTTPServer
-
-def run_fake_server():
-    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-Thread(target=run_fake_server, daemon=True).start()
-
-bot.run(os.getenv("DISCORD_TOKEN"))
