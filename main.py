@@ -63,7 +63,7 @@ async def verificar_muteos_expirados():
 
 # INTERFAZ VISUAL: BOTONES PARA MODERACIÓN MANUAL
 class VotoControl(discord.ui.View):
-    def __init__(self, miembro_objetivo, votantes_requeridos, accion, tiempo_minutos=None, canal_destino=None, mensaje_ctx=None):
+    def __init__(self, miembro_objetivo, votantes_requeridos, accion, tiempo_minutos=None, canal_destino=None, mensaje_ctx=None, embed_original=None):
         super().__init__(timeout=60.0)
         self.miembro_objetivo = miembro_objetivo
         self.votantes_requeridos = votantes_requeridos
@@ -71,6 +71,7 @@ class VotoControl(discord.ui.View):
         self.tiempo_minutos = tiempo_minutos
         self.canal_destino = canal_destino
         self.mensaje_ctx = mensaje_ctx
+        self.embed_original = embed_original
         self.votos_favor = set()
 
     @discord.ui.button(label="Votar SÍ", style=discord.ButtonStyle.danger, emoji="✅")
@@ -119,9 +120,10 @@ class VotoControl(discord.ui.View):
                 cursor.close()
                 conn.close()
         else:
-            embed = interaction.message.embeds[0]
-            embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
-            await interaction.response.edit_message(embed=embed)
+            # Corrección de actualización del footer del Embed original
+            nuevo_embed = self.embed_original.copy()
+            nuevo_embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
+            await interaction.response.edit_message(embed=nuevo_embed)
 
     async def on_timeout(self):
         for child in self.children:
@@ -140,12 +142,13 @@ class VotoControl(discord.ui.View):
 
 # INTERFAZ VISUAL: BOTONES PARA ACCESO A CANALES LLENOS
 class VotoAccesoControl(discord.ui.View):
-    def __init__(self, miembro_solicitante, canal_privado, votantes_requeridos, mensaje_ctx=None):
+    def __init__(self, miembro_solicitante, canal_privado, votantes_requeridos, mensaje_ctx=None, embed_original=None):
         super().__init__(timeout=60.0)
         self.miembro_solicitante = miembro_solicitante
         self.canal_privado = canal_privado
         self.votantes_requeridos = votantes_requeridos
         self.mensaje_ctx = mensaje_ctx
+        self.embed_original = embed_original
         self.votos_favor = set()
 
     @discord.ui.button(label="Permitir Entrada", style=discord.ButtonStyle.success, emoji="🔓")
@@ -178,9 +181,10 @@ class VotoAccesoControl(discord.ui.View):
                 except Exception as e:
                     print(f"Error al mover usuario permitido: {e}")
         else:
-            embed = interaction.message.embeds[0]
-            embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
-            await interaction.response.edit_message(embed=embed)
+            # Corrección de actualización del footer del Embed de acceso
+            nuevo_embed = self.embed_original.copy()
+            nuevo_embed.set_footer(text=f"Progreso: {votos_actuales}/{self.votantes_requeridos} votos requeridos")
+            await interaction.response.edit_message(embed=nuevo_embed)
 
     async def on_timeout(self):
         for child in self.children:
@@ -210,7 +214,6 @@ class VotoAccesoControl(discord.ui.View):
     app_commands.Choice(name="Mover a otra sala", value="mover")
 ])
 async def votar_slash(interaction: discord.Interaction, accion: str, miembro: discord.Member, argumento: str = None):
-    # En comandos diagonales se usa interaction en lugar de ctx
     if not miembro.voice or not miembro.voice.channel:
         await interaction.response.send_message(f"❌ {miembro.display_name} no está en ningún canal de voz.", ephemeral=True)
         return
@@ -222,7 +225,3 @@ async def votar_slash(interaction: discord.Interaction, accion: str, miembro: di
         if not argumento:
             await interaction.response.send_message("❌ Especifica el nombre o ID del canal de voz de destino en el campo de argumento.", ephemeral=True)
             return
-        canal_destino = discord.utils.get(interaction.guild.voice_channels, name=argumento)
-        if not canal_destino and argumento.isdigit():
-            canal_destino = interaction.guild.get_channel(int(argumento))
-        if not canal_destino:
