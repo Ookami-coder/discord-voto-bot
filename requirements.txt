@@ -1,5 +1,2 @@
 discord.py
 psycopg2-binary
-nest-asyncio
-fastapi
-uvicorn
