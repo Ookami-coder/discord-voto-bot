@@ -1,4 +1,3 @@
-# Forzando actualizacion de Render - Comandos Slash
 import discord
 from discord.ext import commands, tasks
 import asyncio
@@ -234,18 +233,3 @@ async def on_ready():
 
 # LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS (CORREGIDA)
 @bot.event
-
-# ====================================================================
-# Servidor web falso para engañar a Render y evitar el Port Timeout
-from threading import Thread
-from http.server import SimpleHTTPRequestHandler, HTTPServer
-
-def run_fake_server():
-    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-Thread(target=run_fake_server, daemon=True).start()
-# ====================================================================
-
-# TU LÍNEA FINAL ORIGINAL (Mantenla tal cual):
-bot.run(os.getenv("DISCORD_TOKEN"))
