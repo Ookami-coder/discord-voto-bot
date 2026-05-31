@@ -33,7 +33,6 @@ def inicializar_db():
     cursor.close()
     conn.close()
 
-# Bucle de revisión horaria basado en zonas horarias nativas de PostgreSQL
 @tasks.loop(seconds=5)
 async def verificar_muteos_expirados():
     try:
@@ -50,12 +49,9 @@ async def verificar_muteos_expirados():
                 miembro = guild.get_member(usuario_id)
                 if miembro:
                     try:
-                        # Si el usuario sigue conectado en voz, le quitamos el muteo de servidor
                         if miembro.voice:
                             await miembro.edit(mute=False)
                             print(f"🔊 Desmuteado: {miembro.display_name}")
-                        else:
-                            print(f"⚠️ {miembro.display_name} no está en voz, pero su tiempo expiró.")
                     except Exception as e:
                         print(f"Error desmuteando a {usuario_id}: {e}")
             
@@ -220,9 +216,24 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
     msg = await ctx.send(mensaje_texto, view=view)
     view.mensaje_ctx = msg
 
-# CORRECCIÓN VITAL: Permite escuchar los comandos ! de texto sin que los eventos de voz interfieran
 @bot.event
 async def on_message(message):
+    if message.author.bot:
+        return
+    await bot.process_commands(message)
+
+@bot.event
+async def on_ready():
+    inicializar_db()
+    try:
+        verificar_muteos_expirados.start()
+    except Exception:
+        pass
+    print(f"🤖 Bot Online en la nube")
+
+
+# LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS (CORREGIDA)
+@bot.event
 
 # ====================================================================
 # Servidor web falso para engañar a Render y evitar el Port Timeout
