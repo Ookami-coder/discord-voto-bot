@@ -211,12 +211,11 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
 
 @bot.event
 async def on_ready():
-    inicializar_db()
+    print(f"🤖 Bot Online en la nube")
     try:
         verificar_muteos_expirados.start()
     except Exception:
         pass
-    print(f"🤖 Bot Online en la nube")
 
 
 # LÓGICA AUTOMÁTICA DETECTORA DE CANALES LLENOS Y CONTROL ANTI-MUTEADOS
@@ -230,3 +229,4 @@ async def on_voice_state_update(member, before, after):
         conn = psycopg2.connect(DB_URI)
         cursor = conn.cursor()
         cursor.execute("SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s", (member.id, member.guild.id))
+        resultado = cursor.fetchone()
