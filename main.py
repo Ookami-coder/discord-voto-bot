@@ -219,3 +219,32 @@ async def votar(ctx, accion: str, miembro: discord.Member, argumento: str = None
             await ctx.send(f"❌ No encontré el canal de voz '{argumento}'.")
             return
 
+# ====================================================================
+# CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
+from threading import Thread
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+def iniciar_bot_fondo():
+    import time
+    time.sleep(2)
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(bot.start(os.getenv("DISCORD_TOKEN")))
+    except Exception as e:
+        print(f"Error al iniciar el bot: {e}")
+
+if __name__ == "__main__":
+    try:
+        inicializar_db()
+    except Exception as e:
+        print(f"Error inicializando DB: {e}")
+    
+    # 1. Arrancamos el bot de Discord en un hilo secundario de fondo
+    Thread(target=iniciar_bot_fondo, daemon=True).start()
+    
+    # 2. Dejamos el servidor web como proceso principal en el puerto 10000
+    print("Moviendo servidor web al proceso principal para Render...")
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
+    server.serve_forever()
+# ====================================================================
