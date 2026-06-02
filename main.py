@@ -10,7 +10,7 @@ from fastapi import FastAPI
 import uvicorn
 from httpx import AsyncClient
 
-# Permitir bucles aninados en entornos asincronos
+# Permitir bucles anidados en entornos asincronos
 nest_asyncio.apply()
 
 # Configuracion de permisos de Discord
@@ -73,7 +73,7 @@ async def verificar_muteos_expirados():
                 query_delete = "DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s"
                 await asyncio.to_thread(ejecutar_query, query_delete, (usuario_id, servidor_id), commit=True)
     except Exception as e:
-        print(f"Error en bucle de verificacion de muteos: {e}")
+        print(f"Error en bucle de verifacion de muteos: {e}")
 
 # --- COMPONENTES DE INTERFAZ: VOTACION DE ACCESO MANUAL ---
 class VotoAccesoControl(discord.ui.View):
