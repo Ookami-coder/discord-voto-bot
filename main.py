@@ -73,7 +73,7 @@ async def verificar_muteos_expirados():
                 query_delete = "DELETE FROM muteos WHERE usuario_id = %s AND servidor_id = %s"
                 await asyncio.to_thread(ejecutar_query, query_delete, (usuario_id, servidor_id), commit=True)
     except Exception as e:
-        print(f"Error en bucle de verifacion de muteos: {e}")
+        print(f"Error en bucle de verificacion de muteos: {e}")
 
 # --- COMPONENTES DE INTERFAZ: VOTACION DE ACCESO MANUAL ---
 class VotoAccesoControl(discord.ui.View):
@@ -190,12 +190,12 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
         canal = ctx.guild.get_channel(int(nombre_o_id_canal))
 
     if not canal or not isinstance(canal, discord.VoiceChannel):
-        await ctx.send(f"No encontre un canal valido.")
+        await ctx.send("No encontre un canal valido.")
         return
 
     usuarios_en_canal = [m for m in canal.members if not m.bot]
     if len(usuarios_en_canal) == 0:
-        await ctx.send(f"El canal esta vacio.")
+        await ctx.send("El canal esta vacio.")
         return
 
     votos_necesarios = math.ceil(len(usuarios_en_canal) / 2)
@@ -222,5 +222,4 @@ async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = 
 
     canal_destino = None
     if accion_limpia == "mover":
-    
-    if not argumento:
+        if not argumento:
