@@ -10,10 +10,10 @@ from fastapi import FastAPI
 import uvicorn
 from httpx import AsyncClient
 
-# Permitir bucles anidados en entornos asíncronos
+# Permitir bucles anidados en entornos asincronos
 nest_asyncio.apply()
 
-# Configuración de permisos de Discord
+# Configuracion de permisos de Discord
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -50,7 +50,7 @@ def inicializar_db():
     """
     ejecutar_query(query, commit=True)
 
-# --- BUCLE DE VERIFICACIÓN EN SEGUNDO PLANO ---
+# --- BUCLE DE VERIFICACION EN SEGUNDO PLANO ---
 @tasks.loop(seconds=10)
 async def verificar_muteos_expirados():
     try:
@@ -75,7 +75,7 @@ async def verificar_muteos_expirados():
     except Exception as e:
         print(f"Error en bucle de verificacion de muteos: {e}")
 
-# --- COMPONENTES DE INTERFAZ: VOTACIÓN DE ACCESO MANUAL ---
+# --- COMPONENTES DE INTERFAZ: VOTACION DE ACCESO MANUAL ---
 class VotoAccesoControl(discord.ui.View):
     def __init__(self, miembro_solicitante, canal_privado, votantes_requeridos, mensaje_ctx=None):
         super().__init__(timeout=60.0)
@@ -120,7 +120,7 @@ class VotoAccesoControl(discord.ui.View):
             except Exception as e:
                 print(f"Error en timeout de acceso: {e}")
 
-# --- COMPONENTES DE INTERFAZ: CONTROL DE MODERACIÓN (SACAR/MUTEAR) ---
+# --- COMPONENTES DE INTERFAZ: CONTROL DE MODERACION (SACAR/MUTEAR) ---
 class VotoControl(discord.ui.View):
     def __init__(self, miembro_objetivo, votantes_requeridos, accion, tiempo_minutos=None, canal_destino=None, mensaje_ctx=None):
         super().__init__(timeout=60.0)
@@ -196,7 +196,7 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
     usuarios_en_canal = [m for m in canal.members if not m.bot]
     
     if len(usuarios_en_canal) == 0:
-        await ctx.send(f"El canal {canal.mention} está completamente vacio.")
+        await ctx.send(f"El canal {canal.mention} esta completamente vacio.")
         return
 
     votos_necesarios = math.ceil(len(usuarios_en_canal) / 2)
@@ -212,7 +212,7 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
     msg = await ctx.send(mensaje_texto, view=view)
     view.mensaje_ctx = msg
 
-# --- COMANDO PRINCIPAL DE VOTACIÓN MODERADORA ---
+# --- COMANDO PRINCIPAL DE VOTACION MODERADORA ---
 @bot.command(name="voto")
 async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = None, *, argumento: str = None):
     accion = accion.lower()
