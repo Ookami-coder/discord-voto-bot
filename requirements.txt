@@ -1,6 +1,7 @@
-discord.py
-psycopg2-binary
-nest-asyncio
-fastapi
-uvicorn
-httpx
+```text
+discord.py==2.4.0
+psycopg2-binary==2.9.9
+nest-asyncio==1.6.0
+fastapi==0.110.0
+uvicorn==0.28.0
+httpx==0.27.0
