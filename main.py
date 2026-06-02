@@ -13,7 +13,7 @@ from httpx import AsyncClient
 # Permitir bucles anidados en entornos asíncronos
 nest_asyncio.apply()
 
-# Configuración de permisos de Discord (Asegúrate de activar los Privileged Intents en el Portal de Desarrolladores)
+# Configuración de permisos de Discord
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -87,7 +87,6 @@ class VotoAccesoControl(discord.ui.View):
 
     @discord.ui.button(label="Permitir Entrada", style=discord.ButtonStyle.success, emoji="🔓")
     async def permitir(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Valida que el votante esté físicamente en el canal de destino
         if not interaction.user.voice or interaction.user.voice.channel != self.canal_privado:
             await interaction.response.send_message("Solo los miembros dentro del canal privado pueden votar.", ephemeral=True)
             return
@@ -104,9 +103,7 @@ class VotoAccesoControl(discord.ui.View):
             await interaction.response.edit_message(content=f"🗳️ ¡Acceso Aprobado! Otorgando permisos y moviendo a {self.miembro_solicitante.mention} al canal {self.canal_privado.mention}.", view=None)
             
             try:
-                # Otorga el permiso explícito de conectar al canal
                 await self.canal_privado.set_permissions(self.miembro_solicitante, connect=True)
-                # Si el usuario ya está en alguna otra llamada del servidor, lo mueve automáticamente
                 if self.miembro_solicitante.voice and self.miembro_solicitante.voice.channel:
                     await self.miembro_solicitante.move_to(self.canal_privado)
             except Exception as e:
@@ -188,7 +185,6 @@ class VotoControl(discord.ui.View):
 # --- COMANDO DE SOLICITUD DE ACCESO A CANAL PRIVADO/LLENO ---
 @bot.command(name="solicitar")
 async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
-    """Permite a un usuario pedir permiso de entrada a un canal privado o lleno."""
     canal = discord.utils.get(ctx.guild.voice_channels, name=nombre_o_id_canal)
     if not canal and nombre_o_id_canal.isdigit():
         canal = ctx.guild.get_channel(int(nombre_o_id_canal))
@@ -197,16 +193,55 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
         await ctx.send(f"❌ No encontré un canal de voz válido con el nombre o ID '{nombre_o_id_canal}'.")
         return
 
-    # Contar cuántos miembros activos que no sean bots están dentro del canal privado
     usuarios_en_canal = [m for m in canal.members if not m.bot]
     
     if len(usuarios_en_canal) == 0:
         await ctx.send(f"❌ El canal {canal.mention} está completamente vacío. Pídele a un administrador que te otorgue accesos directamente.")
         return
 
-    # Se requiere la aprobación de la mitad más uno de la sala actual
     votos_necesarios = math.ceil(len(usuarios_en_canal) / 2)
 
     view = VotoAccesoControl(miembro_solicitante=ctx.author, canal_privado=canal, votantes_requeridos=votos_necesarios)
     
     mensaje_texto = (
+        f"🔓 **Solicitud de Entrada:** {ctx.author.mention} quiere unirse a tu canal de voz {canal.mention}.\n"
+        f"Se requiere que voten los miembros dentro de la llamada. Necesita **{votos_necesarios}** votos para ingresar.\n"
+        f"¡Tienen **1 minuto** para decidir!"
+    )
+    
+    msg = await ctx.send(mensaje_texto, view=view)
+    view.mensaje_ctx = msg
+
+# --- COMANDO PRINCIPAL DE VOTACIÓN MODERADORA ---
+@bot.command(name="voto")
+async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = None, *, argumento: str = None):
+
+# ====================================================================
+# CONFIGURACIÓN DEFINITIVA PARA EL PUERTO GRATUITO DE RENDER
+from threading import Thread
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+def iniciar_bot_fondo():
+    import time
+    time.sleep(2)
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(bot.start(os.getenv("DISCORD_TOKEN")))
+    except Exception as e:
+        print(f"Error al iniciar el bot: {e}")
+
+if __name__ == "__main__":
+    try:
+        inicializar_db()
+    except Exception as e:
+        print(f"Error inicializando DB: {e}")
+    
+    # 1. Arrancamos el bot de Discord en un hilo secundario de fondo
+    Thread(target=iniciar_bot_fondo, daemon=True).start()
+    
+    # 2. Dejamos el servidor web como proceso principal en el puerto 10000
+    print("Moviendo servidor web al proceso principal para Render...")
+    server = HTTPServer(('0.0.0.0', 10000), SimpleHTTPRequestHandler)
+    server.serve_forever()
+# ====================================================================
