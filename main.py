@@ -116,7 +116,7 @@ class VotoAccesoControl(discord.ui.View):
             child.disabled = True
         if self.mensaje_ctx:
             try:
-                await self.mensaje_ctx.edit(content=f"⏰ **Solicitud Rechazada:** Se agotó el tiempo para decidir sobre {self.miembro_solicitante.mention}.", view=self)
+                await self.mensaje_ctx.edit(content=f"⏰ **Solicitud">⏰ **Solicitud Rechazada:** Se agotó el tiempo para decidir sobre {self.miembro_solicitante.mention}.", view=self)
             except Exception as e:
                 print(f"Error en timeout de acceso: {e}")
 
@@ -196,7 +196,7 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
     usuarios_en_canal = [m for m in canal.members if not m.bot]
     
     if len(usuarios_en_canal) == 0:
-        await ctx.send(f"❌ El canal {canal.mention} está completamente vacío. Pídele a un administrador que te otorgue accesos directamente.")
+        await ctx.send(f"❌ El canal {canal.mention} está completamente vacío.")
         return
 
     votos_necesarios = math.ceil(len(usuarios_en_canal) / 2)
@@ -215,3 +215,4 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
 # --- COMANDO PRINCIPAL DE VOTACIÓN MODERADORA ---
 @bot.command(name="voto")
 async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = None, *, argumento: str = None):
+    accion = accion.lower()
