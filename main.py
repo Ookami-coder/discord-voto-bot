@@ -222,4 +222,5 @@ async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = 
 
     canal_destino = None
     if accion_limpia == "mover":
-        if not argumento:
+    
+    if not argumento:
