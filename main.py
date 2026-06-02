@@ -10,7 +10,7 @@ from fastapi import FastAPI
 import uvicorn
 from httpx import AsyncClient
 
-# Permitir bucles anidados en entornos asincronos
+# Permitir bucles aninados en entornos asincronos
 nest_asyncio.apply()
 
 # Configuracion de permisos de Discord
@@ -116,7 +116,7 @@ class VotoAccesoControl(discord.ui.View):
             child.disabled = True
         if self.mensaje_ctx:
             try:
-                await self.mensaje_ctx.edit(content=f"Solicitud Rechazada: Se agoto el tiempo para decidir sobre {self.miembro_solicitante.mention}.", view=self)
+                await self.mensaje_ctx.edit(content=f"Solicitud {self.miembro_solicitante.name} Rechazada por tiempo.", view=self)
             except Exception as e:
                 print(f"Error en timeout de acceso: {e}")
 
@@ -178,11 +178,11 @@ class VotoControl(discord.ui.View):
             child.disabled = True
         if self.mensaje_ctx:
             try:
-                await self.mensaje_ctx.edit(content=f"Votacion Cancelada: Se acabo el tiempo de 1 minuto para decidir sobre {self.miembro_objetivo.mention}.", view=self)
+                await self.mensaje_ctx.edit(content=f"Votacion Cancelada para {self.miembro_objetivo.name}.", view=self)
             except Exception as e:
                 print(f"Error al editar timeout manual: {e}")
 
-# --- COMANDO DE SOLICITUD DE ACCESO A CANAL PRIVADO/LLENO ---
+# --- COMANDO DE SOLICITUD DE ACCESO A CANAL PRIVADO ---
 @bot.command(name="solicitar")
 async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
     canal = discord.utils.get(ctx.guild.voice_channels, name=nombre_o_id_canal)
@@ -190,30 +190,36 @@ async def solicitar_acceso(ctx, *, nombre_o_id_canal: str):
         canal = ctx.guild.get_channel(int(nombre_o_id_canal))
 
     if not canal or not isinstance(canal, discord.VoiceChannel):
-        await ctx.send(f"No encontre un canal de voz valido con el nombre o ID '{nombre_o_id_canal}'.")
+        await ctx.send(f"No encontre un canal valido.")
         return
 
     usuarios_en_canal = [m for m in canal.members if not m.bot]
-    
     if len(usuarios_en_canal) == 0:
-        await ctx.send(f"El canal {canal.mention} esta completamente vacio.")
+        await ctx.send(f"El canal esta vacio.")
         return
 
     votos_necesarios = math.ceil(len(usuarios_en_canal) / 2)
-
     view = VotoAccesoControl(miembro_solicitante=ctx.author, canal_privado=canal, votantes_requeridos=votos_necesarios)
     
     mensaje_texto = (
-        f"Solicitud de Entrada: {ctx.author.mention} quiere unirse a tu canal de voz {canal.mention}.\n"
-        f"Se requiere que voten los miembros dentro de la llamada. Necesita {votos_necesarios} votos para ingresar.\n"
-        f"Tienen 1 minuto para decidir!"
+        f"Solicitud de Entrada: {ctx.author.mention} quiere unirse a {canal.mention}.\n"
+        f"Necesita {votos_necesarios} votos de la llamada. Tienen 1 minuto!"
     )
-    
     msg = await ctx.send(mensaje_texto, view=view)
     view.mensaje_ctx = msg
 
 # --- COMANDO PRINCIPAL DE VOTACION MODERADORA ---
 @bot.command(name="voto")
 async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = None, *, argumento: str = None):
-    accion = accion.lower()
-    if accion not in ["sacar", "mover", "mutear"]:
+    accion_limpia = accion.lower()
+    if accion_limpia not in ["sacar", "mover", "mutear"]:
+        await ctx.send("Accion no valida. Usa: sacar, mover o mutear.")
+        return
+
+    if not miembro.voice or not miembro.voice.channel:
+        await ctx.send("El usuario objetivo debe estar en canal de voz.")
+        return
+
+    canal_destino = None
+    if accion_limpia == "mover":
+        if not argumento:
