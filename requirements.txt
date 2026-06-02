@@ -1,4 +1,3 @@
-```text
 discord.py==2.4.0
 psycopg2-binary==2.9.9
 nest-asyncio==1.6.0
