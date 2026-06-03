@@ -10,7 +10,7 @@ from fastapi import FastAPI
 import uvicorn
 from httpx import AsyncClient
 
-# Permitir bucles aninados en entornos asincronos
+# Permitir bucles anidados en entornos asincronos
 nest_asyncio.apply()
 
 # Configuracion de permisos de Discord
