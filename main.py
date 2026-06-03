@@ -319,4 +319,5 @@ if __name__ == "__main__":
 
     puerto = int(os.getenv("PORT", 10000))
     print(f"Iniciando Uvicorn en el puerto {puerto}...")
-    uvicorn.run("main.:app", host="0.0.0.0", port=puerto, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=puerto, reload=False)
+
