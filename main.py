@@ -222,9 +222,7 @@ async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = 
 
     canal_destino = None
     if accion_limpia == "mover":
-            if not argumento:
-            await ctx.send("Especifica el nombre o ID del canal de voz de destino.")
-            return
+        if not argumento: return await ctx.send("Especifica el nombre o ID del canal de voz de destino.")
         canal_destino = discord.utils.get(ctx.guild.voice_channels, name=argumento)
         if not canal_destino and argumento.isdigit():
             canal_destino = ctx.guild.get_channel(int(argumento))
