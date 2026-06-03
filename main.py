@@ -222,4 +222,103 @@ async def iniciar_voto(ctx, accion: str, miembro: discord.Member, tiempo: int = 
 
     canal_destino = None
     if accion_limpia == "mover":
-        if not argumento:
+            if not argumento:
+            await ctx.send("Especifica el nombre o ID del canal de voz de destino.")
+            return
+        canal_destino = discord.utils.get(ctx.guild.voice_channels, name=argumento)
+        if not canal_destino and argumento.isdigit():
+            canal_destino = ctx.guild.get_channel(int(argumento))
+        if not canal_destino:
+            await ctx.send(f"No encontre el canal de voz '{argumento}'.")
+            return
+
+    if accion_limpia == "mutear" and not tiempo:
+        await ctx.send("Especifica el tiempo en minutos para el muteo.")
+        return
+
+    usuarios_canal = [m for m in miembro.voice.channel.members if not m.bot]
+    votos_necesarios = math.ceil(len(usuarios_canal) / 2)
+
+    view = VotoControl(miembro, votos_necesarios, accion_limpia, tiempo_minutos=tiempo, canal_destino=canal_destino)
+    
+    mensaje_texto = f"Votacion Iniciada por {ctx.author.mention}: Desean {accion_limpia} a {miembro.mention}?"
+    if accion_limpia == "mutear" and tiempo: 
+        mensaje_texto += f" por {tiempo} minutos."
+    if canal_destino: 
+        mensaje_texto += f" al canal {canal_destino.mention}."
+    mensaje_texto += f"\nSe necesitan {votos_necesarios} votos. Tienen 1 minuto para votar!"
+
+    msg = await ctx.send(mensaje_texto, view=view)
+    view.mensaje_ctx = msg
+
+# --- EVENTOS DEL BOT ---
+@bot.event
+async def on_ready():
+    print(f"Bot Online en la nube como {bot.user}")
+    try:
+        await asyncio.to_thread(inicializar_db)
+        if not verificar_muteos_expirados.is_running():
+            verificar_muteos_expirados.start()
+        if not mantener_bot_vivo.is_running() and RENDER_EXTERNAL_URL:
+            mantener_bot_vivo.start()
+    except Exception as e:
+        print(f"Error inicializando componentes en on_ready: {e}")
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+
+    if after.channel and not before.channel:
+        query = "SELECT expira_en FROM muteos WHERE usuario_id = %s AND servidor_id = %s"
+        resultado = await asyncio.to_thread(ejecutar_query, query, (member.id, member.guild.id), fetch=True)
+
+        if resultado and len(resultado) > 0:
+            fecha_expiracion = resultado
+            ahora = datetime.now(timezone.utc)
+            if fecha_expiracion > ahora:
+                try:
+                    await member.edit(mute=True)
+                    print(f"Muteo re-aplicado automaticamente a {member.name} por evasion.")
+                except Exception as e:
+                    print(f"No se pudo re-mutear al usuario evasor: {e}")
+
+# --- RUTAS DE FASTAPI (REQUERIDO POR RENDER) ---
+@app.get("/")
+async def root():
+    return {"status": "online", "message": "Bot is running 24/7 with FastAPI"}
+
+@app.on_event("startup")
+async def startup_event():
+    token = os.getenv("DISCORD_TOKEN")
+    if token:
+        asyncio.create_task(bot.start(token))
+        print("Bot de Discord lanzado exitosamente en segundo plano asincrono.")
+    else:
+        print("Error critico: No se encontro la variable de entorno DISCORD_TOKEN.")
+
+# --- SISTEMA ANTISHUTDOWN NATIVO (KEEP ALIVE ASINCRONO) ---
+@tasks.loop(minutes=10)
+async def mantener_bot_vivo():
+    if not RENDER_EXTERNAL_URL:
+        print("Advertencia: RENDER_EXTERNAL_URL no configurada. El bot podria dormirse.")
+        return
+    try:
+        async with AsyncClient() as client:
+            response = await client.get(RENDER_EXTERNAL_URL)
+            if response.status_code == 200:
+                print("Keep-Alive exitoso: Senal enviada correctamente a FastAPI.")
+    except Exception as e:
+        print(f"Error en el bucle de auto-ping: {e}")
+
+# --- ARRANQUE PRINCIPAL DEL SERVIDOR WEB ---
+if __name__ == "__main__":
+    try:
+        inicializar_db()
+        print("Base de datos verificada e inicializada correctamente.")
+    except Exception as e:
+        print(f"Error inicializando la base de datos: {e}")
+
+    puerto = int(os.getenv("PORT", 10000))
+    print(f"Iniciando Uvicorn en el puerto {puerto}...")
+    uvicorn.run("main.py:app", host="0.0.0.0", port=puerto, reload=False)
